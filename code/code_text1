@@ -1,0 +1,396 @@
+import pygame
+import sys
+from support import import_folder, enemy_import_folder
+
+class Player(pygame.sprite.Sprite):
+    def __init__(self, pos_x, pos_y):
+        super().__init__()
+        self.import_character_assets()
+        self.vel_y = 0
+        self.jump = False
+        self.attacking = False
+        self.attack_type = 0
+        self.health = 100
+        self.alive = True
+        self.frame_index = 0
+        self.animation_speed = 0.20
+        self.image = self.animations['idle'][self.frame_index]
+        self.rect = self.image.get_rect()
+        self.rect.bottomleft = [pos_x, pos_y]
+
+        # player movement
+        self.direction = pygame.math.Vector2(0, 0)
+        self.speed = 5
+        self.gravity = 0.8
+        self.jump_speed = -16
+
+        # player status
+        self.status = 'idle'
+        self.facing_right = True
+
+    def import_character_assets(self):
+        character_path = '../character/'
+        self.animations = {'idle': [], 'attack': [], 'attack2': [], 'jump': [], 'run': [],
+                           'roll': [], 'slide': [], 'hurt': [], 'death': []}
+
+        for animation in self.animations.keys():
+            full_path = character_path + animation
+            self.animations[animation] = import_folder(full_path)
+
+    def player_animation(self):
+        animation = self.animations[self.status]
+
+        # loop over frame index
+        self.frame_index += self.animation_speed
+        if self.frame_index >= len(animation):
+            self.frame_index = 0
+
+        # lets the players turn around
+        image = animation[int(self.frame_index)]
+        if self.facing_right:
+            self.image = image
+        else:
+            flip_img = pygame.transform.flip(image, True, False)
+            self.image = flip_img
+
+    def player_movement(self, screen_width, screen_height, surface):
+        GRAVITY = 0.2
+        dx = 0
+        dy = 0
+        keys = pygame.key.get_pressed()
+
+        # movement
+        if self.health <= 0:
+            self.status = 'death'
+        else:
+            if keys[pygame.K_a]:
+                self.direction.x = -1
+                self.facing_right = False
+            elif keys[pygame.K_d]:
+                self.direction.x = 1
+                self.facing_right = True
+            else:
+                self.direction.x = 0
+
+        # jump
+        if keys[pygame.K_w]:
+            self.player_jump()
+
+        # attack
+        if keys[pygame.K_q] or keys[pygame.K_e]:
+            # determine which one was used
+            if keys[pygame.K_q]:
+                self.attack_type = 1
+                self.player_attack(surface, enemy)
+            if keys[pygame.K_e]:
+                self.attack_type = 2
+                self.player_attack(surface, enemy)
+
+        # apply player gravity
+        self.vel_y += GRAVITY
+        dy += self.vel_y
+
+        # ensure player stays on screen
+        if self.rect.left + dx < -200:
+            dx = -self.rect.left
+        if self.rect.right + dx > 1410:
+            dx = screen_width - self.rect.right
+
+        # ensure player doesn't fall through the screen
+        if self.rect.bottom + dy > screen_height - 50:
+            self.vel_y = 0
+            self.jump = False
+            dy = screen_height - 50 - self.rect.bottom
+
+        # update player position
+        self.rect.x += dx
+        self.rect.y += dy
+
+    def player_attack(self, surface, target):
+        # player attack
+        self.attacking = True
+        attack_rect = pygame.Rect(self.rect.centerx, self.rect.y, self.rect.width // 12, self.rect.height)
+        if attack_rect.colliderect(target.rect):
+            target.health -= 0.1
+
+    def player_gravity(self):
+        self.direction.y += self.gravity
+        self.rect.y += self.direction.y
+
+    def player_jump(self):
+        self.direction.y = self.jump_speed
+
+    def player_status(self):
+        if self.direction.y < 0:
+            self.status = 'jump'
+        else:
+            if self.direction.x != 0:
+                self.status = 'run'
+            else:
+                self.status = 'idle'
+
+            # player death animation
+            if self.animations['death'] and self.health <= 0:
+                self.frame_index = len(self.animations['death']) - 10
+                self.status = 'death'
+                # ensures player can't move after death animation
+                if self.health <= 0:
+                    self.status = 'death'
+                    self.direction.x = 0
+                    self.speed = 0
+                    self.jump_speed = 0
+                    enemy_win()
+
+        # roll animation
+        key = pygame.key.get_pressed()
+        if key[pygame.K_s]:
+            self.status = 'roll'
+            if self.health <= 0:
+                self.status = 'death'
+
+        # slide animation
+        key = pygame.key.get_pressed()
+        if key[pygame.K_c]:
+            self.status = 'slide'
+            if self.health <= 0:
+                self.status = 'death'
+
+        # attack animation
+        key = pygame.key.get_pressed()
+        if key[pygame.K_q]:
+            self.status = 'attack'
+            if self.health <= 0:
+                self.status = 'death'
+        if key[pygame.K_e]:
+            self.status = 'attack2'
+            if self.health <= 0:
+                self.status = 'death'
+
+    def draw(self, surface):
+        screen.blit(self.image, self.rect)
+
+    def update(self):
+        self.player_animation()
+        self.player_movement(screen_width, screen_height, screen)
+        self.player_gravity()
+        self.player_status()
+        self.rect.x += self.direction.x * self.speed
+
+# Enemy AI Class
+class Enemy(pygame.sprite.Sprite):
+    def __init__(self, pos_x, pos_y):
+        super().__init__()
+        self.import_enemy_assets()
+        self.health = 100
+        self.alive = True
+        self.attacking = False
+        self.vel_y = 0
+        self.frame_index = 0
+        self.animation_speed = 0.12
+        self.image = self.animations['idle'][self.frame_index]
+        self.rect = self.image.get_rect()
+        self.rect.bottomright = [pos_x, pos_y]
+
+        # enemy movement
+        self.direction = 1
+        self.speed = 1
+        self.gravity = 0.8
+        self.jump_speed = -16
+
+        # enemy status
+        self.status = 'idle'
+
+    def import_enemy_assets(self):
+        character_path = '../enemy/'
+        self.animations = {'idle': [], 'attack': [], 'jump': [], 'run': [], 'hurt': [], 'death': []}
+
+        for animation in self.animations.keys():
+            full_path = character_path + animation
+            self.animations[animation] = enemy_import_folder(full_path)
+
+    def enemy_animation(self):
+        animation = self.animations[self.status]
+
+        # loop over frame index
+        self.frame_index += self.animation_speed
+        if self.frame_index >= len(animation):
+            self.frame_index = 0
+
+        # flip the image if the enemy has hit a screen edge
+        image = animation[int(self.frame_index)]
+        flip_img = pygame.transform.flip(image, True, False)
+        if self.direction == 1:
+            self.image = pygame.transform.flip(flip_img, True, False)
+        else:
+            self.image = image
+
+    def enemy_movement(self):
+        # sets direction on x and y-axis
+        dx = self.speed * self.direction
+        dy = self.vel_y
+
+        # apply gravity
+        dy += self.gravity
+        if dy > 10:
+            dy = 10
+
+        # check if the enemy hits a screen edge
+        if self.rect.left <= 0:
+            self.direction = 1
+        elif self.rect.right >= screen_width:
+            self.direction = -1
+
+        # update enemy position
+        self.rect.x += dx
+        self.rect.y += dy
+
+        # set the facing direction of the enemy
+        if dx > 0:
+            self.image = pygame.transform.flip(self.animations[self.status][int(self.frame_index)], True, False)
+            self.direction = 1
+        elif dx < 0:
+            self.image = self.animations[self.status][int(self.frame_index)]
+            self.direction = -1
+
+    def enemy_ai_movement(self):
+        # Move enemy from edge to edge of screen width
+        if self.direction == 1 and self.rect.right >= screen_width + 75:
+            self.direction = -1
+        elif self.direction == -1 and self.rect.left <= 0 + -100:
+            self.direction = 1
+
+        # Update enemy position
+        self.rect.x += self.speed * self.direction
+
+    def enemy_jump(self):
+        self.vel_y = self.jump_speed
+
+    def enemy_status(self):
+        if self.vel_y != 0:
+            self.status = 'jump'
+        else:
+            if self.direction != 0:
+                self.status = 'run'
+            else:
+                self.status = 'idle'
+
+            # enemy death animation
+            if self.animations['death'] and self.health <= 0:
+                self.frame_index = len(self.animations['death']) - 1
+                self.status = 'death'
+                self.direction = 0
+                player_win()
+
+        # stops enemy from attacking after death animation
+        if self.health <= 0:
+            self.status = 'death'
+        # enemy attack animation
+        else:
+            self.attacking = True
+            attack_rect = pygame.Rect(self.rect.centerx, self.rect.y, self.rect.width // 12, self.rect.height)
+            if attack_rect.colliderect(player.rect):
+                self.status = 'attack'
+                player.health -= 0.01
+
+    def draw(self, surface):
+        surface.blit(self.image, self.rect)
+
+    def update(self):
+        self.enemy_animation()
+        self.enemy_movement()
+        self.enemy_ai_movement()
+        self.enemy_status()
+
+# initialize pygame and mixer
+pygame.init()
+pygame.mixer.init()
+
+# create frame rate
+clock = pygame.time.Clock()
+FPS = 60
+
+# set screen dimension ans create screen
+screen_width = 1200
+screen_height = 700
+screen = pygame.display.set_mode((screen_width, screen_height))
+pygame.display.set_caption('2nd Game :) ')
+
+# load music
+main_fx = pygame.mixer.Sound('../sounds/village music.mp3')
+main_fx.set_volume(0.5)
+
+# define colors for health bar
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+WHITE = (255, 255, 255)
+
+# define font winner/loser
+font = pygame.font.Font('../Font/PoetsenOne-Regular.ttf', 50)
+
+# creating player and enemy instance
+player = Player(-200, 675)
+enemy = Enemy(1280, 675)
+
+# function for creating background
+def background():
+    bg_img = pygame.image.load('../background/Background.png').convert_alpha()
+    bg_scale = pygame.transform.scale(bg_img, (1200, 700))
+    screen.blit(bg_scale, (0, 0))
+
+# function for health bars
+def health_bars(health, x, y):
+    ratio = health / 100
+    pygame.draw.rect(screen, WHITE, (x - 5, y - 5, 410, 40))
+    pygame.draw.rect(screen, RED, (x, y, 400, 30))
+    pygame.draw.rect(screen, GREEN, (x, y, 400 * ratio, 30))
+
+# function for player win
+def player_win():
+    game_over_text = font.render("You Win! :)", True, (0, 0, 0))
+    screen.blit(game_over_text, (475, 0))
+
+# function for enemy win
+def enemy_win():
+    game_over_text = font.render("You Lose! :(", True, (0, 0, 0))
+    screen.blit(game_over_text, (475, 0))
+
+# game loop
+run = True
+while run:
+
+    # locks frame rate and plays music
+    clock.tick(FPS)
+    main_fx.play()
+
+    # loads bg
+    background()
+
+    # draw player and enemy stats
+    health_bars(player.health, 20, 20)
+    health_bars(enemy.health, 780, 20)
+
+    # event handler
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            run = False
+
+    # player movement
+    player.player_movement(screen_width, screen_height, screen)
+
+    # enemy movement
+    enemy.enemy_movement()
+    enemy.enemy_ai_movement()
+
+    # draw player/enemy
+    player.draw(screen)
+    enemy.draw(screen)
+
+    # update player/enemy
+    player.update()
+    enemy.update()
+
+    # updates display window
+    pygame.display.update()
+
+pygame.quit()
+sys.exit()
